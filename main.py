@@ -1,7 +1,6 @@
 import logging
 import json
-from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, Application
+from telegram.ext import ApplicationBuilder, Application
 from telegram.ext import CommandHandler
 from telegram.ext import MessageHandler
 from telegram.ext import filters
