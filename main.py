@@ -1,12 +1,12 @@
 import logging
+import json
 from telegram import Update 
 from telegram.ext import ApplicationBuilder, ContextTypes
 from telegram.ext import CommandHandler 
 from telegram.ext import MessageHandler 
 from telegram.ext import filters 
 
-BOT_TOKEN = '7338459496:AAEzIvi60Eh4IP-bBA1kWeMYPY4a91ZFPco'
-
+SECRECTS_FILE = ".secret"
 
 async def unknown_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Sorry I can't recognize that, you said '%s'" % update.message.text)
@@ -22,6 +22,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logging.info("[New Request] Got start request")
     await context.bot.send_message(chat_id=update.effective_chat.id, text="I'm a bot, please talk to me!")
 
+def load_secrets():
+    with open(SECRECTS_FILE) as f:
+        return json.load(f)
+
 
 def main() -> None:
     logging.basicConfig(
@@ -29,7 +33,8 @@ def main() -> None:
         level=logging.INFO
     )
     
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    secrets = load_secrets()
+    application = ApplicationBuilder().token(secrets['bot_token']).build()
 
     application.add_handler(CommandHandler('start', start)) 
     application.add_handler(CommandHandler('help', help)) 
