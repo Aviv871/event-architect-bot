@@ -22,11 +22,43 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return END
 
 
+async def show_event_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    logging.info("[New Request] Got show event stats request")
+    event_id = update.message.text.replace("/show_", "").strip()
+    if context.args:
+        event_id = context.args[0]
+    if event_id not in global_events:
+        await update.message.reply_text(
+            text="<b>The event you request was not found 😔</b>\n",
+            parse_mode="HTML",
+        )
+        return END
+
+    items_text = "\n".join(
+        [
+            f"{item.name}{' - ' + item.assigned_user.full_name if item.assigned_user else ''}"
+            for item in global_events[event_id].items
+        ]
+    )
+    event_data = global_events[context.user_data["newest_event_id"]]
+    summary_text = (
+        "<b>Let's see what our state ✍️\n</b>"
+        "<b>Here's a summery of the Event:\n</b>"
+        f"<b>Name:</b> {event_data.name}\n"
+        f"<b>Organizer:</b> {event_data.admin.full_name}\n"
+        f"<b>Invite Link:</b> https://t.me/EventArchitectBot?start={context.user_data['newest_event_id']}\n"
+        "<b>Needed Items:</b>\n"
+        f"{items_text}\n"
+    )
+    await update.message.reply_text(text=summary_text, parse_mode="HTML")
+    return END
+
+
 async def create_or_join_event(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     if context.args:
-        logging.info("[New Request] Got join event request request")
+        logging.info("[New Request] Got join event request")
         event_id = context.args[0]
         if event_id not in global_events:
             logging.warning("Got an unknowen event it: %s", event_id)
@@ -56,7 +88,9 @@ async def handle_event_name(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return ENTERED_NEW_EVENT_NAME
 
-    context.user_data["newest_event_id"] = hashlib.md5(new_event_name.encode()).hexdigest()
+    context.user_data["newest_event_id"] = hashlib.md5(
+        new_event_name.encode()
+    ).hexdigest()
     event_data = global_events[context.user_data["newest_event_id"]] = EventData()
     event_data.users.add(update.effective_user)
     event_data.admin = update.effective_user
@@ -174,7 +208,9 @@ async def handle_event_creation_summery(
         f"<b>Name:</b> {event_data.name}\n"
         f"<b>Organizer:</b> {event_data.admin.full_name}\n"
         f"<b>Needed Items:</b> {items_text}\n"
-        f"<b>Invite Link:</b> https://t.me/EventArchitectBot?start={context.user_data['newest_event_id']}"
+        f"<b>Invite Link:</b> https://t.me/EventArchitectBot?start={context.user_data['newest_event_id']}\n\n"
+        "<b>Use this commnad to get updated:</b>\n"
+        f"/show_{context.user_data['newest_event_id']}"
     )
 
     # Determine the correct way to send a reply based on the update type
@@ -276,14 +312,22 @@ async def handle_item_to_bring_summary(
 ) -> int:
     selections = context.user_data["items_selection"]
     event_data = global_events[context.user_data["newest_event_id"]]
+    user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
     items_text = (
         ", ".join(event_data.items[int(opt)].name for opt in selections)
         if selections
         else "Nothing 🥲"
     )
+    previous_items_text = ", ".join(
+        item.name
+        for index, item in enumerate(event_data.items)
+        if item.assigned_user and item.assigned_user.id == user_id and str(index) not in selections
+    ) 
+    previous_text = f"<b>And you prevoiusly volunteered to bring:</b> {previous_items_text}\n" if previous_items_text else ""
     summary_text = (
         "<b>Thank you for the cooperation! 🔥\n</b>"
-        f"<b>You volunteered to bring: {items_text}\n</b>"
+        f"<b>You volunteered to bring:</b> {items_text}\n"
+        f"{previous_text}"
         "<b>See you there!\n</b>"
         f"<b>Event Name:</b> {event_data.name}\n"
         f"<b>Organizer:</b> {event_data.admin.name}\n"

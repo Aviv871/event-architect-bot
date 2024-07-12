@@ -19,6 +19,7 @@ from event_commands import (
     handle_new_item,
     handle_event_creation_summery,
     handle_items_to_bring_selection,
+    show_event_stats
 )
 from state import *
 
@@ -69,6 +70,9 @@ def register_handlers(application: Application) -> None:
 
     # Handle the case when a user sends /start but they're not in a conversation
     application.add_handler(CommandHandler("start", create_or_join_event))
+
+    application.add_handler(CommandHandler("show", show_event_stats))
+    application.add_handler(MessageHandler(filters.Regex(r"^(/show_[\S]+)$"), show_event_stats))
 
 
 def main() -> None:
