@@ -101,9 +101,7 @@ async def car_mileage_decision(
         return await skip_mileage(update, context)
 
 
-async def car_mileage(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
+async def car_mileage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Stores the car mileage."""
     context.user_data["car_mileage"] = update.message.text
     await update.message.reply_text(
@@ -114,9 +112,7 @@ async def car_mileage(
     return PHOTO
 
 
-async def skip_mileage(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
+async def skip_mileage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Skips the mileage input."""
     context.user_data["car_mileage"] = "Not provided"
 
