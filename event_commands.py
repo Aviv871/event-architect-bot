@@ -2,17 +2,15 @@ import logging
 import hashlib
 from typing import Dict, List
 from telegram import (
-    ReplyKeyboardMarkup,
     Update,
     ReplyKeyboardRemove,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
 from telegram.ext import ContextTypes
-from Event import EventData, EventItem
+from disk import flush_data_to_disk
+from event import EventData, EventItem, EventUser
 from state import *
-
-global_events: Dict[str, EventData] = {}
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -27,7 +25,7 @@ async def show_event_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     event_id = update.message.text.replace("/show_", "").strip()
     if context.args:
         event_id = context.args[0]
-    if event_id not in global_events:
+    if event_id not in context.application.bot_data["events"].events:
         await update.message.reply_text(
             text="<b>The event you request was not found 😔</b>\n",
             parse_mode="HTML",
@@ -37,16 +35,16 @@ async def show_event_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     items_text = "\n".join(
         [
             f"{item.name}{' - ' + item.assigned_user.full_name if item.assigned_user else ''}"
-            for item in global_events[event_id].items
+            for item in context.application.bot_data["events"].events[event_id].items
         ]
     )
-    event_data = global_events[context.user_data["newest_event_id"]]
+    event_data = context.application.bot_data["events"].events[event_id]
     summary_text = (
         "<b>Let's see what our state ✍️\n</b>"
         "<b>Here's a summery of the Event:\n</b>"
         f"<b>Name:</b> {event_data.name}\n"
         f"<b>Organizer:</b> {event_data.admin.full_name}\n"
-        f"<b>Invite Link:</b> https://t.me/EventArchitectBot?start={context.user_data['newest_event_id']}\n"
+        f"<b>Invite Link:</b> https://t.me/EventArchitectBot?start={event_id}\n"
         "<b>Needed Items:</b>\n"
         f"{items_text}\n"
     )
@@ -60,12 +58,16 @@ async def create_or_join_event(
     if context.args:
         logging.info("[New Request] Got join event request")
         event_id = context.args[0]
-        if event_id not in global_events:
+        if event_id not in context.application.bot_data["events"].events:
             logging.warning("Got an unknowen event it: %s", event_id)
             return END
         context.user_data["newest_event_id"] = event_id
-        event_data = global_events[event_id]
-        event_data.users.add(update.effective_user)
+        event_data = context.application.bot_data["events"].events[event_id]
+        event_data.users.add(
+            EventUser(
+                id=update.effective_user.id, full_name=update.effective_user.full_name
+            )
+        )
         return await handle_user_joined(update, context)
     else:
         logging.info("[New Request] Got new create event request")
@@ -80,7 +82,8 @@ async def create_or_join_event(
 
 async def handle_event_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     new_event_name = update.message.text.strip()
-    if new_event_name in global_events:
+    new_name_hash = hashlib.md5(new_event_name.encode()).hexdigest()
+    if new_name_hash in context.application.bot_data["events"].events:
         await update.message.reply_text(
             f"The name '{new_event_name}' is alreay taken 🥲\n"
             f"Please enter a new name:\n",
@@ -88,12 +91,18 @@ async def handle_event_name(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return ENTERED_NEW_EVENT_NAME
 
-    context.user_data["newest_event_id"] = hashlib.md5(
-        new_event_name.encode()
-    ).hexdigest()
-    event_data = global_events[context.user_data["newest_event_id"]] = EventData()
-    event_data.users.add(update.effective_user)
-    event_data.admin = update.effective_user
+    context.user_data["newest_event_id"] = new_name_hash
+    event_data = context.application.bot_data["events"].events[
+        context.user_data["newest_event_id"]
+    ] = EventData()
+    event_data.users.add(
+        EventUser(
+            id=update.effective_user.id, full_name=update.effective_user.full_name
+        )
+    )
+    event_data.admin = EventUser(
+        id=update.effective_user.id, full_name=update.effective_user.full_name
+    )
     event_data.name = new_event_name
 
     await update.message.reply_text(
@@ -108,7 +117,9 @@ async def handle_event_name(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def handle_new_item(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     new_item_name = update.message.text.strip()
     context.user_data["newest_item_name"] = new_item_name
-    event_data = global_events[context.user_data["newest_event_id"]]
+    event_data = context.application.bot_data["events"].events[
+        context.user_data["newest_event_id"]
+    ]
     event_data.items.append(EventItem(name=new_item_name))
 
     keyboard = [
@@ -174,7 +185,9 @@ async def handle_more_of_same_item(
     if new_item_count < 1:
         return got_invalid_number()
 
-    event_data = global_events[context.user_data["newest_event_id"]]
+    event_data = context.application.bot_data["events"].events[
+        context.user_data["newest_event_id"]
+    ]
     for _ in range(new_item_count - 1):
         event_data.items.append(EventItem(name=context.user_data["newest_item_name"]))
 
@@ -198,10 +211,14 @@ async def handle_event_creation_summery(
     items_text = ", ".join(
         [
             item.name
-            for item in global_events[context.user_data["newest_event_id"]].items
+            for item in context.application.bot_data["events"]
+            .events[context.user_data["newest_event_id"]]
+            .items
         ]
     )
-    event_data = global_events[context.user_data["newest_event_id"]]
+    event_data = context.application.bot_data["events"].events[
+        context.user_data["newest_event_id"]
+    ]
     summary_text = (
         "<b>Let's go over it ✍️\n</b>"
         "<b>Here's a summery of the Event:\n</b>"
@@ -230,6 +247,7 @@ async def handle_event_creation_summery(
             "handle_event_creation_summery was called without a message or callback_query context."
         )
 
+    flush_data_to_disk(context.application.bot_data["events"].events)
     return END
 
 
@@ -243,7 +261,9 @@ async def handle_user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE)
         keyboard.append([InlineKeyboardButton("Submit", callback_data="submit")])
         return InlineKeyboardMarkup(keyboard)
 
-    event_data = global_events[context.user_data["newest_event_id"]]
+    event_data = context.application.bot_data["events"].events[
+        context.user_data["newest_event_id"]
+    ]
     context.user_data["items_selection"] = list()
     if any([item for item in event_data.items if not item.assigned_user]):
         summary_text = (
@@ -277,12 +297,16 @@ async def handle_items_to_bring_selection(
     query = update.callback_query
     await query.answer()
     selections = context.user_data["items_selection"]
-    event_data = global_events[context.user_data["newest_event_id"]]
+    event_data = context.application.bot_data["events"].events[
+        context.user_data["newest_event_id"]
+    ]
 
     if query.data == "submit":
         if selections:
             for opt in selections:
-                event_data.items[int(opt)].assigned_user = query.from_user
+                event_data.items[int(opt)].assigned_user = EventUser(
+                    id=query.from_user.id, full_name=query.from_user.full_name
+                )
             selected_text = ", ".join(
                 event_data.items[int(opt)].name for opt in selections
             )
@@ -311,8 +335,14 @@ async def handle_item_to_bring_summary(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     selections = context.user_data["items_selection"]
-    event_data = global_events[context.user_data["newest_event_id"]]
-    user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
+    event_data = context.application.bot_data["events"].events[
+        context.user_data["newest_event_id"]
+    ]
+    user_id = (
+        update.effective_user.id
+        if update.effective_user
+        else update.callback_query.from_user.id
+    )
     items_text = (
         ", ".join(event_data.items[int(opt)].name for opt in selections)
         if selections
@@ -321,16 +351,22 @@ async def handle_item_to_bring_summary(
     previous_items_text = ", ".join(
         item.name
         for index, item in enumerate(event_data.items)
-        if item.assigned_user and item.assigned_user.id == user_id and str(index) not in selections
-    ) 
-    previous_text = f"<b>And you prevoiusly volunteered to bring:</b> {previous_items_text}\n" if previous_items_text else ""
+        if item.assigned_user
+        and item.assigned_user.id == user_id
+        and str(index) not in selections
+    )
+    previous_text = (
+        f"<b>And you prevoiusly volunteered to bring:</b> {previous_items_text}\n"
+        if previous_items_text
+        else ""
+    )
     summary_text = (
         "<b>Thank you for the cooperation! 🔥\n</b>"
         f"<b>You volunteered to bring:</b> {items_text}\n"
         f"{previous_text}"
         "<b>See you there!\n</b>"
         f"<b>Event Name:</b> {event_data.name}\n"
-        f"<b>Organizer:</b> {event_data.admin.name}\n"
+        f"<b>Organizer:</b> {event_data.admin.full_name}\n"
         f"<b>Invite Link:</b> https://t.me/EventArchitectBot?start={context.user_data['newest_event_id']}"
     )
 
@@ -351,4 +387,5 @@ async def handle_item_to_bring_summary(
             "handle_item_to_bring_summary was called without a message or callback_query context."
         )
 
+    flush_data_to_disk(context.application.bot_data["events"])
     return END

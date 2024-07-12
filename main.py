@@ -1,5 +1,5 @@
 import logging
-import json
+import sys
 from telegram.ext import (
     ApplicationBuilder,
     Application,
@@ -9,26 +9,10 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
 )
-from event_commands import (
-    cancel,
-    create_or_join_event,
-    handle_event_name,
-    handle_item_to_bring_summary,
-    handle_more_items_decision,
-    handle_more_of_same_item,
-    handle_new_item,
-    handle_event_creation_summery,
-    handle_items_to_bring_selection,
-    show_event_stats
-)
+from event_commands import *
 from state import *
-
-SECRECTS_FILE = ".secret"
-
-
-def load_secrets() -> dict:
-    with open(SECRECTS_FILE) as f:
-        return json.load(f)
+from event import Events
+from disk import flush_data_to_disk, load_data_from_disk, load_secrets
 
 
 def register_handlers(application: Application) -> None:
@@ -72,24 +56,40 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("start", create_or_join_event))
 
     application.add_handler(CommandHandler("show", show_event_stats))
-    application.add_handler(MessageHandler(filters.Regex(r"^(/show_[\S]+)$"), show_event_stats))
+    application.add_handler(
+        MessageHandler(filters.Regex(r"^(/show_[\S]+)$"), show_event_stats)
+    )
 
 
-def main() -> None:
+def init_logger():
+    file_handler = logging.FileHandler(filename="main_bot.log", mode="a")
+    stdout_handler = logging.StreamHandler(stream=sys.stdout)
+    handlers = [file_handler, stdout_handler]
     logging.basicConfig(
         format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
         level=logging.INFO,
+        handlers=handlers,
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
+
+def main() -> None:
+    init_logger()
     secrets = load_secrets()
     application = ApplicationBuilder().token(secrets["bot_token"]).build()
+
+    application.bot_data["events"] = Events(**load_data_from_disk())
+
     register_handlers(application)
 
     try:
         application.run_polling()
-    except Exception:
-        logging.info("[Stopped] Bot stopped")
+    except KeyboardInterrupt:
+        logging.info("[Stopped] Bot stopped with KeyboardInterrupt")
+    except:
+        logging.exception("Unknown excption.")
+
+    flush_data_to_disk(application.bot_data["events"])
 
 
 if __name__ == "__main__":
