@@ -251,28 +251,52 @@ async def handle_event_creation_summery(
     return END
 
 
-async def handle_user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    def get_base_keyboard(event_data: EventData):
-        keyboard = [
-            [InlineKeyboardButton(item.name, callback_data=str(index))]
-            for index, item in enumerate(event_data.items)
-            if not item.assigned_user
-        ]
-        keyboard.append([InlineKeyboardButton("Submit", callback_data="submit")])
-        return InlineKeyboardMarkup(keyboard)
+async def get_updated_keyboard(
+    selected: List[str], event_data: EventData, user_id: int
+):
+    keyboard = []
+    for i in range(len(event_data.items)):
+        text = event_data.items[i].name + (" ✔️" if str(i) in selected else "")
+        if (
+            not event_data.items[i].assigned_user
+            or event_data.items[i].assigned_user.id == user_id
+        ):
+            keyboard.append([InlineKeyboardButton(text, callback_data=str(i))])
+    keyboard.append([InlineKeyboardButton("Submit", callback_data="submit")])
+    return InlineKeyboardMarkup(keyboard)
 
+
+async def handle_user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     event_data = context.application.bot_data["events"].events[
         context.user_data["newest_event_id"]
     ]
-    context.user_data["items_selection"] = list()
-    if any([item for item in event_data.items if not item.assigned_user]):
+    context.user_data["items_selection"] = [
+        str(index)
+        for index, value in enumerate(event_data.items)
+        if value.assigned_user and value.assigned_user.id == update.effective_user.id
+    ]
+
+    if any(
+        [
+            item
+            for item in event_data.items
+            if not item.assigned_user
+            or item.assigned_user.id == update.effective_user.id
+        ]
+    ):
         summary_text = (
             f"Welcome to the event - {event_data.name}\n"
             f"Organized by - {event_data.admin.full_name}\n"
             "Here is what we still need help with, what can you bring?\n"
         )
+        markup = await get_updated_keyboard(
+            context.user_data["items_selection"],
+            event_data,
+            update.effective_user.id,
+        )
         await update.message.reply_text(
-            text=summary_text, reply_markup=get_base_keyboard(event_data)
+            text=summary_text,
+            reply_markup=markup,
         )
         return ENTERED_ITEM_TO_BRING
     else:
@@ -285,15 +309,6 @@ async def handle_user_joined(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def handle_items_to_bring_selection(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    async def get_updated_keyboard(selected: List[str], event_data: EventData):
-        keyboard = []
-        for i in range(len(event_data.items)):
-            text = event_data.items[i].name + (" ✔️" if str(i) in selected else "")
-            if not event_data.items[i].assigned_user:
-                keyboard.append([InlineKeyboardButton(text, callback_data=str(i))])
-        keyboard.append([InlineKeyboardButton("Submit", callback_data="submit")])
-        return InlineKeyboardMarkup(keyboard)
-
     query = update.callback_query
     await query.answer()
     selections = context.user_data["items_selection"]
@@ -302,31 +317,35 @@ async def handle_items_to_bring_selection(
     ]
 
     if query.data == "submit":
-        if selections:
-            for opt in selections:
-                event_data.items[int(opt)].assigned_user = EventUser(
+        for index, item in enumerate(event_data.items):
+            if (
+                item.assigned_user
+                and item.assigned_user.id == query.from_user.id
+                and str(index) not in selections
+            ):
+                event_data.items[index].assigned_user = None
+                continue
+            if str(index) in selections:
+                event_data.items[index].assigned_user = EventUser(
                     id=query.from_user.id, full_name=query.from_user.full_name
                 )
-            selected_text = ", ".join(
-                event_data.items[int(opt)].name for opt in selections
-            )
+        selected_text = ", ".join(
+            event_data.items[int(opt)].name for opt in selections
+        )
+        if selections:
             await query.edit_message_text(f"You selected: {selected_text}")
         else:
             await query.edit_message_text("You didn't select any options.")
         return await handle_item_to_bring_summary(update, context)
 
-    # Track user selections
-    if "items_selection" not in context.user_data:
-        context.user_data["items_selection"] = list()
-
     items_selection = context.user_data["items_selection"]
-    if query.data not in context.user_data["items_selection"]:
+    if query.data not in items_selection:
         items_selection.append(query.data)
     else:
         items_selection.remove(query.data)
 
     # Update the keyboard to reflect current selections
-    markup = await get_updated_keyboard(items_selection, event_data)
+    markup = await get_updated_keyboard(items_selection, event_data, query.from_user.id)
     await query.edit_message_reply_markup(reply_markup=markup)
     return ENTERED_ITEM_TO_BRING
 
@@ -338,32 +357,14 @@ async def handle_item_to_bring_summary(
     event_data = context.application.bot_data["events"].events[
         context.user_data["newest_event_id"]
     ]
-    user_id = (
-        update.effective_user.id
-        if update.effective_user
-        else update.callback_query.from_user.id
-    )
     items_text = (
         ", ".join(event_data.items[int(opt)].name for opt in selections)
         if selections
         else "Nothing 🥲"
     )
-    previous_items_text = ", ".join(
-        item.name
-        for index, item in enumerate(event_data.items)
-        if item.assigned_user
-        and item.assigned_user.id == user_id
-        and str(index) not in selections
-    )
-    previous_text = (
-        f"<b>And you prevoiusly volunteered to bring:</b> {previous_items_text}\n"
-        if previous_items_text
-        else ""
-    )
     summary_text = (
         "<b>Thank you for the cooperation! 🔥\n</b>"
         f"<b>You volunteered to bring:</b> {items_text}\n"
-        f"{previous_text}"
         "<b>See you there!\n</b>"
         f"<b>Event Name:</b> {event_data.name}\n"
         f"<b>Organizer:</b> {event_data.admin.full_name}\n"

@@ -36,6 +36,8 @@ def load_data_from_disk() -> dict:
             data = f.read()
             if data:
                 return json.loads(data)
+            else:
+                return dict()
     except:
         logging.exception("Failed to read data from the disk")
         return dict()
